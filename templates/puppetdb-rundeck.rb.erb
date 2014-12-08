@@ -7,59 +7,56 @@ require 'yaml'
 require 'sinatra'
 
 # Base URL of the PuppetDB database.  Do not include a trailing slash!
-host_uri = 'http://<%= @puppetdb_host %>'
+HOST_URI = 'http://<%= @puppetdb_host %>'
 # Port number for the PuppetDB REST interface -- default is 8080 for clear, 8081 for SSL.
-port = '<%= @puppetdb_port %>'
-
-puppetdb_resource_query = {'query'=>'["=", "type", "Class"],]'}
+PORT = '<%= @puppetdb_port %>'
 
 before do
-  response["Content-Type"] = "application/yaml"
+    response['Content-Type'] = 'application/yaml'
+end
+
+def query_puppetdb(puppet_resource, query_params = nil)
+
+    uri = URI.parse("#{HOST_URI}:#{PORT}/v3/#{puppet_resource}")
+    uri.query = URI.encode_www_form(query_params) if query_params
+    http = Net::HTTP.new(uri.host, uri.port)
+    response = http.get("#{uri.path}?#{uri.query}", 'Accept' => 'application/json')
+
+    return JSON.parse(response.body)
 end
 
 get '/' do
-	uri = URI.parse( "#{host_uri}:#{port}/v3/resources" )
-	http = Net::HTTP.new(uri.host, uri.port) 
-	request = Net::HTTP::Get.new(uri.path) 
-	request.set_form_data( puppetdb_resource_query )
-	request = Net::HTTP::Get.new( uri.path+ '?' + request.body ) 
-	request.add_field("Accept", "application/json")
-	response = http.request(request)
-	puppetdb_data = JSON.parse(response.body)
 
-	rundeck_resources = Hash.new
-	puppetdb_data.each{|d|
-	host     = d['certname']
-	title    = d['title']
-	rundeck_resources[host] = Hash.new if not rundeck_resources.key?(host)
-	rundeck_resources[host]['tags'] = Array.new if not rundeck_resources[host].key?('tags')
-	rundeck_resources[host]['tags'] << title
-	}
-	
-	rundeck_resources.keys.sort.each { |k|
-	rundeck_resources[k]['tags'].uniq!
-	rundeck_resources[k]['tags'] =  rundeck_resources[k]['tags'].join(",")
-	rundeck_resources[k]['hostname'] = k
-	}
-	
-	uri = URI.parse( "#{host_uri}:#{port}/v3/facts" )
-	http = Net::HTTP.new(uri.host, uri.port) 
-	request = Net::HTTP::Get.new(uri.path) 
-	request = Net::HTTP::Get.new(uri.path)
-	request.add_field("Accept", "application/json")
-	response = http.request(request)
-	puppetdb_data = JSON.parse(response.body)
-		
-	puppetdb_data.each{|d|
-	host     = d['certname']
-	name     = d['name'] if d['name'] != "hostname"
-  	value    = d['value'] if d['name'] != "hostname"
-  	if ( name == 'serialnumber' )
-    		rundeck_resources[host][name] = 'Serial Number ' + value
-  	else
-		rundeck_resources[host][name] = value
-	end
-	}
+    rundeck_resources = {}
 
-	rundeck_resources.to_yaml
+    resources = query_puppetdb('resources', 'query' => '["=", "type", "Class"],]')
+
+    resources.each do |resource|
+        host = resource['certname']
+        title = resource['title']
+        rundeck_resources[host] ||= {}
+        rundeck_resources[host]['tags'] ||= []
+        rundeck_resources[host]['tags'] << title
+    end
+
+    rundeck_resources.keys.sort.each do |k|
+        rundeck_resources[k]['tags'] = rundeck_resources[k]['tags'].uniq.join(",")
+        rundeck_resources[k]['hostname'] = k
+    end
+
+    facts = query_puppetdb('facts')
+
+    facts.each do |fact|
+        # skip hostname facts
+        next if fact['name'] == 'hostname'
+
+        host = fact['certname']
+        name = fact['name']
+        value = fact['value']
+        if rundeck_resources.key?(host)
+            rundeck_resources[host][name] = value.to_s
+        end
+    end
+
+    rundeck_resources.to_yaml
 end
