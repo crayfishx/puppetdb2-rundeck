@@ -34,21 +34,17 @@ set host_uri and port in the script
 
 
 ## Usage
-Within your rundeck project configuration, add a Resource Model Source of type "URL Source", pointing at the machine that this web application is running on, port 8888 (or whatever you've configured it to use per the Apache configuration)
+Within your rundeck project configuration, add a Resource Model Source of type "URL Source", pointing at the machine that this web application is running on, port 8888 (or whatever you've configured it to use per the Apache configuration).
+The URL params hostname_prefix and rundeck_user are mandatory params!
 
 Example:
-URL Field: http://localhost:8888
+URL Field: http://localhost:8888/:hostname_prefix/:rundeck_user
 
 Timeout: 90
 
 Cache Results: Not checked
 
 Any Jobs created under this Project should now have access to all nodes known by PuppetDB.
-
-###Filtering
-This plugin exposes both classes and facts of all nodes known by PuppetDB to Rundeck.  See the Rundeck documents on how to filter.  Puppet facts are exposed as Rundeck "Attributes", so to filter by all RedHat-derived machines, you could enter "osfamily: RedHat" into the filter field and it will show only nodes that PuppetDB knows to have that fact with that value.
-
-All known facts exposed to Rundeck can be viewed by looking at the "nodes" tab and expanding any of the nodes listed below.  They are listed in the format of "Fact (attribute): Value".  Note that this list can be quite long depending on your environment.  This DOES include custom facts.
 
 
 ## Credits

@@ -25,37 +25,32 @@ def query_puppetdb(puppet_resource, query_params = nil)
     return JSON.parse(response.body)
 end
 
-get '/' do
+get '/:hostname_prefix/:rundeck_user' do
 
     rundeck_resources = {}
 
-    resources = query_puppetdb('resources', 'query' => '["=", "type", "Class"],]')
+    nodes = query_puppetdb('nodes', 'query' => '["~", "name", "'+@params[:hostname_prefix]+'"]')
 
-    resources.each do |resource|
-        host = resource['certname']
-        title = resource['title']
-        rundeck_resources[host] ||= {}
-        rundeck_resources[host]['tags'] ||= []
-        rundeck_resources[host]['tags'] << title
+    puts nodes
+
+    nodes.each do |node|
+         name = node['name']
+         rundeck_resources[name] ||= {}
+         rundeck_resources[name]['username'] = params[:rundeck_user]
+         rundeck_resources[name]['nodename'] = name
+         rundeck_resources[name]['hostname'] = name
     end
 
-    rundeck_resources.keys.sort.each do |k|
-        rundeck_resources[k]['tags'] = rundeck_resources[k]['tags'].uniq.join(",")
-        rundeck_resources[k]['hostname'] = k
-    end
+    facts_os = query_puppetdb('facts/os', 'query' => '["~", "certname", "'+@params[:hostname_prefix]+'"]')
 
-    facts = query_puppetdb('facts')
+    facts_os.each do |os|
+      p os
+      real_os = eval(os['value'])
+      host = os['certname']
+      rundeck_resources[host]['osFamily'] = real_os['family']
+      rundeck_resources[host]['osName'] = real_os['lsb']['distdescription']
+      rundeck_resources[host]['osVersion'] = real_os['lsb']['distrelease']
 
-    facts.each do |fact|
-        # skip hostname facts
-        next if fact['name'] == 'hostname'
-
-        host = fact['certname']
-        name = fact['name']
-        value = fact['value']
-        if rundeck_resources.key?(host)
-            rundeck_resources[host][name] = value.to_s
-        end
     end
 
     rundeck_resources.to_yaml
