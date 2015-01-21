@@ -7,59 +7,51 @@ require 'yaml'
 require 'sinatra'
 
 # Base URL of the PuppetDB database.  Do not include a trailing slash!
-host_uri = 'http://<%= @puppetdb_host %>'
+HOST_URI = 'http://<%= @puppetdb_host %>'
 # Port number for the PuppetDB REST interface -- default is 8080 for clear, 8081 for SSL.
-port = '<%= @puppetdb_port %>'
-
-puppetdb_resource_query = {'query'=>'["=", "type", "Class"],]'}
+PORT = '<%= @puppetdb_port %>'
 
 before do
-  response["Content-Type"] = "application/yaml"
+    response['Content-Type'] = 'application/yaml'
 end
 
-get '/' do
-	uri = URI.parse( "#{host_uri}:#{port}/v3/resources" )
-	http = Net::HTTP.new(uri.host, uri.port) 
-	request = Net::HTTP::Get.new(uri.path) 
-	request.set_form_data( puppetdb_resource_query )
-	request = Net::HTTP::Get.new( uri.path+ '?' + request.body ) 
-	request.add_field("Accept", "application/json")
-	response = http.request(request)
-	puppetdb_data = JSON.parse(response.body)
+def query_puppetdb(puppet_resource, query_params = nil)
 
-	rundeck_resources = Hash.new
-	puppetdb_data.each{|d|
-	host     = d['certname']
-	title    = d['title']
-	rundeck_resources[host] = Hash.new if not rundeck_resources.key?(host)
-	rundeck_resources[host]['tags'] = Array.new if not rundeck_resources[host].key?('tags')
-	rundeck_resources[host]['tags'] << title
-	}
-	
-	rundeck_resources.keys.sort.each { |k|
-	rundeck_resources[k]['tags'].uniq!
-	rundeck_resources[k]['tags'] =  rundeck_resources[k]['tags'].join(",")
-	rundeck_resources[k]['hostname'] = k
-	}
-	
-	uri = URI.parse( "#{host_uri}:#{port}/v3/facts" )
-	http = Net::HTTP.new(uri.host, uri.port) 
-	request = Net::HTTP::Get.new(uri.path) 
-	request = Net::HTTP::Get.new(uri.path)
-	request.add_field("Accept", "application/json")
-	response = http.request(request)
-	puppetdb_data = JSON.parse(response.body)
-		
-	puppetdb_data.each{|d|
-	host     = d['certname']
-	name     = d['name'] if d['name'] != "hostname"
-  	value    = d['value'] if d['name'] != "hostname"
-  	if ( name == 'serialnumber' )
-    		rundeck_resources[host][name] = 'Serial Number ' + value
-  	else
-		rundeck_resources[host][name] = value
-	end
-	}
+    uri = URI.parse("#{HOST_URI}:#{PORT}/v3/#{puppet_resource}")
+    uri.query = URI.encode_www_form(query_params) if query_params
+    http = Net::HTTP.new(uri.host, uri.port)
+    response = http.get("#{uri.path}?#{uri.query}", 'Accept' => 'application/json')
 
-	rundeck_resources.to_yaml
+    return JSON.parse(response.body)
+end
+
+get '/:hostname_prefix/:rundeck_user' do
+
+    rundeck_resources = {}
+
+    nodes = query_puppetdb('nodes', 'query' => '["~", "name", "'+@params[:hostname_prefix]+'"]')
+
+    puts nodes
+
+    nodes.each do |node|
+         name = node['name']
+         rundeck_resources[name] ||= {}
+         rundeck_resources[name]['username'] = params[:rundeck_user]
+         rundeck_resources[name]['nodename'] = name
+         rundeck_resources[name]['hostname'] = name
+    end
+
+    facts_os = query_puppetdb('facts/os', 'query' => '["~", "certname", "'+@params[:hostname_prefix]+'"]')
+
+    facts_os.each do |os|
+      p os
+      real_os = eval(os['value'])
+      host = os['certname']
+      rundeck_resources[host]['osFamily'] = real_os['family']
+      rundeck_resources[host]['osName'] = real_os['lsb']['distdescription']
+      rundeck_resources[host]['osVersion'] = real_os['lsb']['distrelease']
+
+    end
+
+    rundeck_resources.to_yaml
 end
